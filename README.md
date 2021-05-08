@@ -23,9 +23,11 @@ var closed = make(chan struct{})
 func init() {
 	gin.SetMode(gin.ReleaseMode)
 
+	// 注册 && 初始化 信号
 	sigs = make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
+	
+	// 信号的后台监听
 	go func() {
 		sig := <-sigs
 		log.Println("sig:", sig, "received")
@@ -36,12 +38,14 @@ func init() {
 func main() {
 	defer log.Println("Main is exited.")
 
+	// errgroup 初始化
 	g, ctx := errgroup.WithContext(context.Background())
 
 	g.Go(func() error {
 		s := HelloServer()
 
 		go func() {
+			// 其他 errgroup 组内成员失败 或 收到信号 就执行 Shutdown
 			select {
 			case <-ctx.Done():
 			case <-closed:
@@ -55,8 +59,10 @@ func main() {
 			if err != nil {
 				log.Println(err)
 			}
+			// 这里其实可能时间太短（基本不可能），输出不了，小问题
 		}()
 
+		// 监听是主线任务，所以不能放到后台（即不能和上面的 go func(){ ... } 调换位置）
 		return s.ListenAndServe()
 	})
 
@@ -64,6 +70,7 @@ func main() {
 		s := NotAllowedServer()
 
 		go func() {
+			// 其他 errgroup 组内成员失败 或 收到信号 就执行 Shutdown
 			select {
 			case <-ctx.Done():
 			case <-closed:
@@ -77,8 +84,10 @@ func main() {
 			if err != nil {
 				log.Println(err)
 			}
+			// 这里其实可能时间太短（基本不可能），输出不了，小问题
 		}()
 
+		// 监听是主线任务，所以不能放到后台（即不能和上面的 go func(){ ... } 调换位置）
 		return s.ListenAndServe()
 	})
 
@@ -90,6 +99,7 @@ func main() {
 	log.Println("Main done.")
 }
 
+// Gin 注册 及 返回 Server 指针，因为要用 http.Server 的 Shutdown 方法
 func HelloServer() *http.Server {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -104,6 +114,7 @@ func HelloServer() *http.Server {
 	return s
 }
 
+// Gin 注册 及 返回 Server 指针，因为要用 http.Server 的 Shutdown 方法
 func NotAllowedServer() *http.Server {
 	r := gin.New()
 	r.Use(gin.Logger())
@@ -119,6 +130,18 @@ func NotAllowedServer() *http.Server {
 }
 
 ```
+```golang
+// 输出：
+
+2021/05/08 20:23:56 sig: interrupt received
+2021/05/08 20:23:56 HelloServer will shutdown ...
+2021/05/08 20:23:56 NotAllowedServer will shutdown ...
+2021/05/08 20:23:56 errgroup.Group.err: http: Server closed
+2021/05/08 20:23:56 Main done.
+2021/05/08 20:23:56 Main is exited.
+
+```
+
 
 ### 感悟？
   - gin 源码需要阅读
@@ -153,4 +176,4 @@ func main() {
 	os.Stdout.WriteString("aaaaaaaaaaaaa\n")
 }
   ```
-  stdout 和 stderr 每次出现的顺序不一样
+  stdout 和 stderr 每次出现的顺序不一样，解释解释？🤭 :)
